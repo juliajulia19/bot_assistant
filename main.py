@@ -9,7 +9,6 @@ from aiogram.contrib.fsm_storage.files import JSONStorage
 from aiogram.dispatcher.filters.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup
 
-from newsMK import news_df
 from assist_database import Procurement
 
 # Configure logging
@@ -28,9 +27,10 @@ class States(StatesGroup):
     staff_state = State()
     procurement_state_1 = State() #для ввода наименования товара
     procurement_state_2 = State() #для ввода количества
-    chedule_state = State()
+    schedule_state = State()
 
 staff_df = pd.read_csv('staff_df.csv')
+news_df = pd.read_csv('newsMK_df.csv')
 
 #основное меню по команде /start
 
@@ -64,6 +64,9 @@ async def send_news(message: types.Message, state: FSMContext):
     random_number = random.randint(0, 153)
     await message.answer(f'{news_df.iloc[random_number, 1]} \n'  #выдаем случайную новость из датафрейма
                          f'Ссылка на источник: {news_df.iloc[random_number, 0]} \n'
+                         f' \n'
+                         f'{news_df.iloc[random_number, 5]}'
+                         f' \n'
                          f' \n'
                          f'Нажмите кнопку "Следующая новость", чтобы ознакомиться с другими новостями или вернитесь в главное меню',
                          reply_markup=markup)

@@ -10,70 +10,73 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score
-#spacy.cli.download('ru_core_news_sm')
+#spacy.cli.download('ru_core_news_sm') #закомментировано, чтоб каждый раз не скачивать модель
 
 stop_words = stopwords.words('russian')
 
 
 #парсинг новостей общей тематики
-url = "https://www.mk.ru/news/2024/6/9/"
-page = rq.get(url)
-soup = BeautifulSoup(page.text, features="html.parser")
-
-news_title = soup.find_all('h3', {'class' : 'news-listing__item-title'})
-text_title = [i.text for i in news_title]
-
-
-links = []
-for i in soup.find_all('a', {'class' : 'news-listing__item-link'}):
-      links.append(i.get('href'))
-
-
-def GetNewsBody(url):
-  page = rq.get(url)
-  soup = BeautifulSoup(page.text, features="html.parser")
-  body_text = []
-  for item in soup.find_all('div', {'class': 'article__body'}):
-        for i in item.find_all('p'):
-            body_text.append(i.text.strip())
-
-  return ' '.join(body_text)
-
-news_body = []
-for link in links:
-    new = GetNewsBody(link)
-    news_body.append(new)
-
-
-for i in news_body:
-    i = i.replace('\xa0', ' ')
-
-
-# print(news_body)
+# url = "https://www.mk.ru/news/2024/6/9/"
+# page = rq.get(url)
+# soup = BeautifulSoup(page.text, features="html.parser")
 #
-news_df = pd.DataFrame({'link': links, 'title': text_title, 'text': news_body})
-# news_df.to_csv('newsMK_df.csv')
-# print(news_df)
+# news_title = soup.find_all('h3', {'class' : 'news-listing__item-title'})
+# text_title = [i.text for i in news_title]
+#
+#
+# links = []
+# for i in soup.find_all('a', {'class' : 'news-listing__item-link'}):
+#       links.append(i.get('href'))
+#
+#
+# def GetNewsBody(url):
+#   page = rq.get(url)
+#   soup = BeautifulSoup(page.text, features="html.parser")
+#   body_text = []
+#   for item in soup.find_all('div', {'class': 'article__body'}):
+#         for i in item.find_all('p'):
+#             body_text.append(i.text.strip())
+#
+#   return ' '.join(body_text)
+#
+# news_body = []
+# for link in links:
+#     new = GetNewsBody(link)
+#     news_body.append(new)
+#
+#
+# for i in news_body:
+#     i = i.replace('\xa0', ' ')
+#
+#
+# # print(news_body)
+# #
+# news_df = pd.DataFrame({'link': links, 'title': text_title, 'text': news_body})
+# # news_df.to_csv('newsMK_df.csv')
+# # print(news_df)
 
 nlp_rus = spacy.load("ru_core_news_sm")
-#сделаем отдельный столбец с очищенным и лемматизированным текстом
-def preprocess(text):
-    tokenized = word_tokenize(text)
-    text_clean = []
-    for word in tokenized:
-        if word[0].isalnum() and word not in stop_words:
-            text_clean.append(word)
-    doc = nlp_rus(' '.join(text_clean)) #передаем в spacy и лемматизируем
-    lemmas = []
-    for token in doc:
-        lemmas.append(token.lemma_)
-    return ' '.join(lemmas)
+# #сделаем отдельный столбец с очищенным и лемматизированным текстом
+# def preprocess(text):
+#     tokenized = word_tokenize(text)
+#     text_clean = []
+#     for word in tokenized:
+#         if word[0].isalnum() and word not in stop_words:
+#             text_clean.append(word)
+#     doc = nlp_rus(' '.join(text_clean)) #передаем в spacy и лемматизируем
+#     lemmas = []
+#     for token in doc:
+#         lemmas.append(token.lemma_)
+#     return ' '.join(lemmas)
+#
+# news_df['text_lemmas'] = news_df['text'].apply(preprocess)
 
-news_df['text_lemmas'] = news_df['text'].apply(preprocess)
+#закоментировала строки выше, чтобы не парсить каждый раз, иначе там срабатывает firewall, загрузила полученный ранее датасет из файла
+news_df = pd.read_csv('newsMK_df.csv')
 
-#выделение именнованных сущностей для каждой статьи
+# #выделение именнованных сущностей для каждой статьи
 
 ents = [] #список списков для всех NER по статьям
 for i in news_df['text_lemmas']:
@@ -83,12 +86,74 @@ for i in news_df['text_lemmas']:
         article_ents.append((ent.text, ent.label_))
     ents.append(article_ents)
 
-#можно позже слепить именованную сущность и лейбл
-
 news_df['NER'] = ents #добавляем колонку с NER в датафрейм
-news_df.to_csv('newsMK_df.csv')
 
-#предобработанный текст на тренировочную и тестовую выборку, чтобы иметь возможность оценить качество работы модели
+#то что спейси не определил как NER или не нашел
+FACs = ['atacms', 'миг-29', 'су-27', 'су-25', 'Су-24', 'covid-19', 'истребитель Mirage 2000-5']
+LOCs = ['улица сарьяна', 'улица прошяну', 'азербайджанская ССР', 'сектор газа', 'река иордан', 'киев', 'уимбилдон', 'хонсю', 'южный осетия', 'беверли-хиллз', 'амхерст', 'цхинвальском регионе', 'миргород', 'поселок прибрежный', 'обь', 'регион пил', 'единая осетия', 'поселок аэропорт', 'миллионный улица', 'мексиканская республика', 'люберцах']
+PERs = ['гарник даниелян', 'биньямин нетаньяху', 'джо байден', 'хейсканен', 'кафельников', 'бахыш бахышлы', 'олаф шольц', 'теодор постол', 'аскеров', 'ныхас', 'иры фарн', 'шломи зив', 'ноа аргамани', 'данил миленин', 'фарида']
+ORGs = ['мхат', 'олимпийский игра', 'армянская апостольская церковь', 'РИА Новости', 'Sky News', 'ЦАХАЛ', 'YouGov', 'the national', 'Ferrari Challenge Japan', 'бундесвер', 'тасс', 'зов народ', 'пмэф', 'федерация спортивный борьба', 'говорит москва', 'белый дом', 'файтбомбер', 'егэ', 'министерство здравоохранения', 'эрмитаж', 'миницифры', 'портал госуслуг', 'канал известие', 'йеменские хуситы']
+def add_ner(text):
+    additional_ners = []
+    for word in FACs:
+        if word in text:
+            a = (word, 'FAC')
+            additional_ners.append(a)
+    for word in LOCs:
+        if word in text:
+            a = (word, 'LOC')
+            additional_ners.append(a)
+    for word in PERs:
+        if word in text:
+            a = (word, 'PER')
+            additional_ners.append(a)
+    for word in ORGs:
+        if word in text:
+            a = (word, 'ORG')
+            additional_ners.append(a)
+
+    return additional_ners
+
+#смотрим есть ли пропущенные spacy NER в лемматизированном тексте и добавляем столбец с ними в датафрейм
+news_df['additional_ners'] = news_df['text_lemmas'].apply(add_ner)
+
+#соединяем NER полученные spacy и то^ xnj spacy пропустил для каждой статьи, чтобы был полный список хештегов
+additional_ners = news_df['additional_ners'].tolist()
+combined_list_ner = [a + b for a, b in zip(ents, additional_ners)]
+
+hashtags = []
+hashtags_final = []
+for kort in combined_list_ner:
+    all_hash = []
+    for i in kort:
+        if i[1] == 'LOC' or i[1] == 'PER': #делаем NER c лейблами PER и LOC с заглавной буквы для имен и стран или все буквы заглавные для аббревиатур(длина строки меньше или равно3)
+           if len(i[0]) <= 3:
+               ner = i[0].upper()
+           else:
+               ner = i[0].title()
+        else:
+            ner = i[0]
+        all_hash.append(ner) #сохраняем все NER без лейбла
+        prom = []
+        for k in all_hash:
+            k = re.sub(' - ', '-', k) #убираем лишние пробелы рядом с дефисами, которые появились после лемматизации
+            k = re.sub(' ', '_', k) #склеиваем NER где больше 1 слова нижним подчеркиванием
+            prom.append(k)
+        uniq_hash = set(prom) #убираем повторы NER для каждой строки
+    hashtags.append(uniq_hash)
+    for h in hashtags: #добавляем решетку, убираем формат списка
+        s = ''
+        for j in h:
+            s += ' #' + j
+    hashtags_final.append(s)
+
+news_df['hashtags'] = hashtags_final
+
+
+news_df.to_csv('newsMK_df.csv', index=False)
+
+
+#предобработанный текст делим на тренировочную и тестовую выборку, чтобы иметь возможность оценить качество работы модели
 X = news_df['text_lemmas']
 y = news_df['title'].tolist() #y мы не будем использовать, нужен только чтобы поделить на тренировочное и тестовое множество
 
@@ -194,14 +259,14 @@ def plot_top_words(model, feature_names, n_top_words, title, n_components, max_p
 
     plt.show()
 
-# plot_top_words(lda2, tf_feature_names, 10, 'Распределение слов по темам, LDA-модель', n_components2)
-# plot_top_words(lda3, tf_feature_names, 10, 'Распределение слов по темам, LDA-модель', n_components3)
-# plot_top_words(lda5, tf_feature_names, 10, 'Распределение слов по темам, LDA-модель', n_components5)
+plot_top_words(lda2, tf_feature_names, 10, 'Распределение слов по темам, LDA-модель', n_components2)
+plot_top_words(lda3, tf_feature_names, 10, 'Распределение слов по темам, LDA-модель', n_components3)
+plot_top_words(lda5, tf_feature_names, 10, 'Распределение слов по темам, LDA-модель', n_components5)
 
 
 #результаты максимально неинформативны
 
-#попробуем кластеризовать тексты c разными векторайзерами
+#попробуем кластеризовать все тексты корпуса c разными векторайзерами с помощью KMeans
 Tfidf = TfidfVectorizer()
 count = CountVectorizer()
 X = news_df['text_lemmas']
@@ -222,11 +287,46 @@ k_means_clusters_3_с = KMeans(n_clusters=10, random_state=0).fit(X_count)
 k_means_clusters_5_с = KMeans(n_clusters=5, random_state=0).fit(X_count)
 k_means_clusters_7_с = KMeans(n_clusters=20, random_state=0).fit(X_count)
 k_means_clusters_10_с = KMeans(n_clusters=3, random_state=0).fit(X_count)
-# print(silhouette_score(X_count, k_means_clusters_3_с.labels_))
-# print(silhouette_score(X_count, k_means_clusters_5_с.labels_))
-# print(silhouette_score(X_count, k_means_clusters_7_с.labels_))
-# print(silhouette_score(X_count, k_means_clusters_10_с.labels_))
+print(silhouette_score(X_count, k_means_clusters_3_с.labels_))
+print(silhouette_score(X_count, k_means_clusters_5_с.labels_))
+print(silhouette_score(X_count, k_means_clusters_7_с.labels_))
+print(silhouette_score(X_count, k_means_clusters_10_с.labels_))
 
 #silhouette_score также очень низкий, не удалось нормально поделить новостную выборку на кластеры
 
+#попробуем поделить на кластеры с помощью DBSCAN
+clustering = DBSCAN(eps=1, min_samples=40).fit(X_tf)
+print(set(clustering.labels_))
+clustering_2 = DBSCAN(eps=0.2, min_samples=2).fit(X_tf)
+print(set(clustering_2.labels_))
+clustering_3 = DBSCAN(eps=0.5, min_samples=3).fit(X_tf)
+print(set(clustering_3.labels_))
+clustering_4 = DBSCAN(eps=1, min_samples=5).fit(X_tf)
+print(set(clustering_4.labels_))
+clustering_5 = DBSCAN(eps=2, min_samples=10).fit(X_tf)
+print(set(clustering_5.labels_))
+clustering_6 = DBSCAN(eps=3, min_samples=15).fit(X_tf)
+print(set(clustering_6.labels_))
+clustering_7 = DBSCAN(eps=5, min_samples=10).fit(X_tf)
+print(set(clustering_7.labels_))
 
+clustering8 = DBSCAN(eps=1, min_samples=40).fit(X_count)
+print(set(clustering8.labels_))
+clustering9 = DBSCAN(eps=0.2, min_samples=2).fit(X_count)
+print(set(clustering9.labels_))
+clustering10 = DBSCAN(eps=0.5, min_samples=3).fit(X_count)
+print(set(clustering10.labels_))
+clustering11 = DBSCAN(eps=1, min_samples=5).fit(X_count)
+print(set(clustering11.labels_))
+clustering12 = DBSCAN(eps=2, min_samples=10).fit(X_count)
+print(set(clustering12.labels_))
+clustering13 = DBSCAN(eps=3, min_samples=15).fit(X_count)
+print(set(clustering13.labels_))
+clustering14 = DBSCAN(eps=5, min_samples=10).fit(X_count)
+print(set(clustering14.labels_))
+clustering15 = DBSCAN(eps=0.1, min_samples=3).fit(X_count)
+print(set(clustering15.labels_))
+clustering16 = DBSCAN(eps=0.1, min_samples=2).fit(X_count)
+print(set(clustering16.labels_))
+
+#DBSCAN находит только 1 кластер 0 или только шум -1, silhouette_score в этом случае не сработает
